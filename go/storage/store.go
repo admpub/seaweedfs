@@ -43,7 +43,9 @@ func NewMasterNodes(bootstrapNode string) (mn *MasterNodes) {
 	return
 }
 func (mn *MasterNodes) reset() {
+	glog.V(4).Infof("Resetting master nodes: %v", mn)
 	if len(mn.nodes) > 1 && mn.lastNode > 0 {
+		glog.V(0).Infof("Reset master %s from: %v", mn.nodes[mn.lastNode], mn.nodes)
 		mn.lastNode = -mn.lastNode
 	}
 }
@@ -53,14 +55,17 @@ func (mn *MasterNodes) findMaster() (string, error) {
 	}
 	if mn.lastNode < 0 {
 		for _, m := range mn.nodes {
+			glog.V(4).Infof("Listing masters on %s", m)
 			if masters, e := operation.ListMasters(m); e == nil {
 				if len(masters) == 0 {
 					continue
 				}
-				mn.nodes = masters
+				mn.nodes = append(masters, m)
 				mn.lastNode = rand.Intn(len(mn.nodes))
-				glog.V(2).Info("current master node is :", mn.nodes[mn.lastNode])
+				glog.V(2).Infof("current master nodes is %v", mn)
 				break
+			} else {
+				glog.V(4).Infof("Failed listing masters on %s: %v", m, e)
 			}
 		}
 	}
@@ -308,6 +313,7 @@ func (s *Store) SendHeartbeatToMaster() (masterNode string, secretKey security.S
 	}
 
 	joinUrl := "http://" + masterNode + "/dir/join"
+	glog.V(4).Infof("Connecting to %s ...", joinUrl)
 
 	jsonBlob, err := util.PostBytes(joinUrl, data)
 	if err != nil {
@@ -317,9 +323,11 @@ func (s *Store) SendHeartbeatToMaster() (masterNode string, secretKey security.S
 	var ret operation.JoinResult
 	if err := json.Unmarshal(jsonBlob, &ret); err != nil {
 		glog.V(0).Infof("Failed to join %s with response: %s", joinUrl, string(jsonBlob))
+		s.masterNodes.reset()
 		return masterNode, "", err
 	}
 	if ret.Error != "" {
+		s.masterNodes.reset()
 		return masterNode, "", errors.New(ret.Error)
 	}
 	s.volumeSizeLimit = ret.VolumeSizeLimit
@@ -363,9 +371,9 @@ func (s *Store) Delete(i VolumeId, n *Needle) (uint32, error) {
 	}
 	return 0, nil
 }
-func (s *Store) Read(i VolumeId, n *Needle) (int, error) {
+func (s *Store) ReadVolumeNeedle(i VolumeId, n *Needle) (int, error) {
 	if v := s.findVolume(i); v != nil {
-		return v.read(n)
+		return v.readNeedle(n)
 	}
 	return 0, fmt.Errorf("Volume %v not found!", i)
 }

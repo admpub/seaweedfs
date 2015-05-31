@@ -25,8 +25,8 @@ func (v *Volume) Compact() error {
 }
 func (v *Volume) commitCompact() error {
 	glog.V(3).Infof("Committing vacuuming...")
-	v.accessLock.Lock()
-	defer v.accessLock.Unlock()
+	v.dataFileAccessLock.Lock()
+	defer v.dataFileAccessLock.Unlock()
 	glog.V(3).Infof("Got Committing lock...")
 	_ = v.dataFile.Close()
 	var e error
@@ -65,6 +65,7 @@ func (v *Volume) copyDataAndGenerateIndexFile(dstName, idxName string) (err erro
 
 	err = ScanVolumeFile(v.dir, v.Collection, v.Id, v.needleMapKind,
 		func(superBlock SuperBlock) error {
+			superBlock.CompactRevision++
 			_, err = dst.Write(superBlock.Bytes())
 			return err
 		}, true, func(n *Needle, offset int64) error {

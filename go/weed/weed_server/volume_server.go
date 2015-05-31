@@ -47,10 +47,13 @@ func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
 	adminMux.HandleFunc("/ui/index.html", vs.uiStatusHandler)
 	adminMux.HandleFunc("/status", vs.guard.WhiteList(vs.statusHandler))
 	adminMux.HandleFunc("/admin/assign_volume", vs.guard.WhiteList(vs.assignVolumeHandler))
-	adminMux.HandleFunc("/admin/vacuum_volume_check", vs.guard.WhiteList(vs.vacuumVolumeCheckHandler))
-	adminMux.HandleFunc("/admin/vacuum_volume_compact", vs.guard.WhiteList(vs.vacuumVolumeCompactHandler))
-	adminMux.HandleFunc("/admin/vacuum_volume_commit", vs.guard.WhiteList(vs.vacuumVolumeCommitHandler))
+	adminMux.HandleFunc("/admin/vacuum/check", vs.guard.WhiteList(vs.vacuumVolumeCheckHandler))
+	adminMux.HandleFunc("/admin/vacuum/compact", vs.guard.WhiteList(vs.vacuumVolumeCompactHandler))
+	adminMux.HandleFunc("/admin/vacuum/commit", vs.guard.WhiteList(vs.vacuumVolumeCommitHandler))
 	adminMux.HandleFunc("/admin/delete_collection", vs.guard.WhiteList(vs.deleteCollectionHandler))
+	adminMux.HandleFunc("/admin/sync/status", vs.guard.WhiteList(vs.getVolumeSyncStatusHandler))
+	adminMux.HandleFunc("/admin/sync/index", vs.guard.WhiteList(vs.getVolumeIndexContentHandler))
+	adminMux.HandleFunc("/admin/sync/data", vs.guard.WhiteList(vs.getVolumeDataContentHandler))
 	adminMux.HandleFunc("/stats/counter", vs.guard.WhiteList(statsCounterHandler))
 	adminMux.HandleFunc("/stats/memory", vs.guard.WhiteList(statsMemoryHandler))
 	adminMux.HandleFunc("/stats/disk", vs.guard.WhiteList(vs.statsDiskHandler))
@@ -64,10 +67,12 @@ func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
 	go func() {
 		connected := true
 
+		glog.V(0).Infof("Volume server bootstraps with master %s", vs.GetMasterNode())
 		vs.store.SetBootstrapMaster(vs.GetMasterNode())
 		vs.store.SetDataCenter(vs.dataCenter)
 		vs.store.SetRack(vs.rack)
 		for {
+			glog.V(4).Infof("Volume server sending to master %s", vs.GetMasterNode())
 			master, secretKey, err := vs.store.SendHeartbeatToMaster()
 			if err == nil {
 				if !connected {
@@ -77,7 +82,7 @@ func NewVolumeServer(adminMux, publicMux *http.ServeMux, ip string,
 					glog.V(0).Infoln("Volume Server Connected with master at", master)
 				}
 			} else {
-				glog.V(1).Infof("Volume Server Failed to talk with master %+v: %v", vs, err)
+				glog.V(1).Infof("Volume Server Failed to talk with master %s: %v", vs.masterNode, err)
 				if connected {
 					connected = false
 				}

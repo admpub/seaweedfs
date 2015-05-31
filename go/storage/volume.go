@@ -24,8 +24,8 @@ type Volume struct {
 
 	SuperBlock
 
-	accessLock       sync.Mutex
-	lastModifiedTime uint64 //unix time in seconds
+	dataFileAccessLock sync.Mutex
+	lastModifiedTime   uint64 //unix time in seconds
 }
 
 func NewVolume(dirname string, collection string, id VolumeId, needleMapKind NeedleMapType, replicaPlacement *ReplicaPlacement, ttl *TTL) (v *Volume, e error) {
@@ -53,6 +53,9 @@ func (v *Volume) FileName() (fileName string) {
 		fileName = path.Join(v.dir, v.Collection+"_"+v.Id.String())
 	}
 	return
+}
+func (v *Volume) DataFile() *os.File {
+	return v.dataFile
 }
 func (v *Volume) load(alsoLoadIndex bool, createDatIfMissing bool, needleMapKind NeedleMapType) error {
 	var e error
@@ -136,8 +139,8 @@ func (v *Volume) Size() int64 {
 
 // Close cleanly shuts down this volume
 func (v *Volume) Close() {
-	v.accessLock.Lock()
-	defer v.accessLock.Unlock()
+	v.dataFileAccessLock.Lock()
+	defer v.dataFileAccessLock.Unlock()
 	v.nm.Close()
 	_ = v.dataFile.Close()
 }
@@ -152,7 +155,7 @@ func (v *Volume) isFileUnchanged(n *Needle) bool {
 	nv, ok := v.nm.Get(n.Id)
 	if ok && nv.Offset > 0 {
 		oldNeedle := new(Needle)
-		_, err := oldNeedle.Read(v.dataFile, int64(nv.Offset)*NeedlePaddingSize, nv.Size, v.Version())
+		err := oldNeedle.ReadData(v.dataFile, int64(nv.Offset)*NeedlePaddingSize, nv.Size, v.Version())
 		if err != nil {
 			glog.V(0).Infof("Failed to check updated file %v", err)
 			return false
@@ -180,14 +183,38 @@ func (v *Volume) Destroy() (err error) {
 	return
 }
 
+// AppendBlob append a blob to end of the data file, used in replication
+func (v *Volume) AppendBlob(b []byte) (offset int64, err error) {
+	if v.readOnly {
+		err = fmt.Errorf("%s is read-only", v.dataFile.Name())
+		return
+	}
+	v.dataFileAccessLock.Lock()
+	defer v.dataFileAccessLock.Unlock()
+	if offset, err = v.dataFile.Seek(0, 2); err != nil {
+		glog.V(0).Infof("failed to seek the end of file: %v", err)
+		return
+	}
+	//ensure file writing starting from aligned positions
+	if offset%NeedlePaddingSize != 0 {
+		offset = offset + (NeedlePaddingSize - offset%NeedlePaddingSize)
+		if offset, err = v.dataFile.Seek(offset, 0); err != nil {
+			glog.V(0).Infof("failed to align in datafile %s: %v", v.dataFile.Name(), err)
+			return
+		}
+	}
+	v.dataFile.Write(b)
+	return
+}
+
 func (v *Volume) write(n *Needle) (size uint32, err error) {
 	glog.V(4).Infof("writing needle %s", NewFileIdFromNeedle(v.Id, n).String())
 	if v.readOnly {
 		err = fmt.Errorf("%s is read-only", v.dataFile.Name())
 		return
 	}
-	v.accessLock.Lock()
-	defer v.accessLock.Unlock()
+	v.dataFileAccessLock.Lock()
+	defer v.dataFileAccessLock.Unlock()
 	if v.isFileUnchanged(n) {
 		size = n.DataSize
 		glog.V(4).Infof("needle is unchanged!")
@@ -231,8 +258,8 @@ func (v *Volume) delete(n *Needle) (uint32, error) {
 	if v.readOnly {
 		return 0, fmt.Errorf("%s is read-only", v.dataFile.Name())
 	}
-	v.accessLock.Lock()
-	defer v.accessLock.Unlock()
+	v.dataFileAccessLock.Lock()
+	defer v.dataFileAccessLock.Unlock()
 	nv, ok := v.nm.Get(n.Id)
 	//fmt.Println("key", n.Id, "volume offset", nv.Offset, "data_size", n.Size, "cached size", nv.Size)
 	if ok {
@@ -250,17 +277,19 @@ func (v *Volume) delete(n *Needle) (uint32, error) {
 	return 0, nil
 }
 
-func (v *Volume) read(n *Needle) (int, error) {
+// read fills in Needle content by looking up n.Id from NeedleMapper
+func (v *Volume) readNeedle(n *Needle) (int, error) {
 	nv, ok := v.nm.Get(n.Id)
 	if !ok || nv.Offset == 0 {
 		return -1, errors.New("Not Found")
 	}
-	bytesRead, err := n.Read(v.dataFile, int64(nv.Offset)*NeedlePaddingSize, nv.Size, v.Version())
+	err := n.ReadData(v.dataFile, int64(nv.Offset)*NeedlePaddingSize, nv.Size, v.Version())
 	if err != nil {
-		return bytesRead, err
+		return 0, err
 	}
+	bytesRead := len(n.Data)
 	if !n.HasTtl() {
-		return bytesRead, err
+		return bytesRead, nil
 	}
 	ttlMinutes := n.Ttl.Minutes()
 	if ttlMinutes == 0 {
@@ -285,7 +314,7 @@ func ScanVolumeFile(dirname string, collection string, id VolumeId,
 		return fmt.Errorf("Failed to load volume %d: %v", id, err)
 	}
 	if err = visitSuperBlock(v.SuperBlock); err != nil {
-		return fmt.Errorf("Failed to read volume %d super block: %v", id, err)
+		return fmt.Errorf("Failed to process volume %d super block: %v", id, err)
 	}
 
 	version := v.Version()

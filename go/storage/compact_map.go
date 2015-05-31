@@ -1,5 +1,7 @@
 package storage
 
+import "strconv"
+
 type NeedleValue struct {
 	Key    Key
 	Offset uint32 `comment:"Volume offset"` //since aligned to 8 bytes, range is 4G*8=32G
@@ -11,6 +13,10 @@ const (
 )
 
 type Key uint64
+
+func (k Key) String() string {
+	return strconv.FormatUint(uint64(k), 10)
+}
 
 type CompactSection struct {
 	values   []NeedleValue
@@ -169,6 +175,7 @@ func (cm *CompactMap) binarySearchCompactSection(key Key) int {
 	return -3
 }
 
+// Visit visits all entries or stop if any error when visiting
 func (cm *CompactMap) Visit(visit func(NeedleValue) error) error {
 	for _, cs := range cm.list {
 		for _, v := range cs.overflow {

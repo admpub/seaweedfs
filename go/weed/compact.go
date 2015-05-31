@@ -7,7 +7,6 @@ import (
 
 func init() {
 	cmdCompact.Run = runCompact // break init cycle
-	cmdCompact.IsDebug = cmdCompact.Flag.Bool("debug", false, "enable debug mode")
 }
 
 var cmdCompact = &Command{
@@ -21,7 +20,7 @@ var cmdCompact = &Command{
 }
 
 var (
-	compactVolumePath       = cmdCompact.Flag.String("dir", "/tmp", "data directory to store files")
+	compactVolumePath       = cmdCompact.Flag.String("dir", ".", "data directory to store files")
 	compactVolumeCollection = cmdCompact.Flag.String("collection", "", "volume collection name")
 	compactVolumeId         = cmdCompact.Flag.Int("volumeId", -1, "a volume id. The volume should already exist in the dir.")
 )
