@@ -1,5 +1,5 @@
 .goxc*
-vendor
+# vendor
 tags
 *.swp
 ### OSX template
