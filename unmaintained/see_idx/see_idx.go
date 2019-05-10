@@ -2,12 +2,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path"
 	"strconv"
 
-	"github.com/chrislusf/seaweedfs/go/glog"
-	"github.com/chrislusf/seaweedfs/go/storage"
+	"github.com/chrislusf/seaweedfs/weed/glog"
+	"github.com/chrislusf/seaweedfs/weed/storage"
+	"github.com/chrislusf/seaweedfs/weed/storage/types"
 )
 
 var (
@@ -33,6 +35,9 @@ func main() {
 	}
 	defer indexFile.Close()
 
-	storage.LoadNeedleMap(indexFile)
+	storage.WalkIndexFile(indexFile, func(key types.NeedleId, offset types.Offset, size uint32) error {
+		fmt.Printf("key:%v offset:%v size:%v\n", key, offset, size)
+		return nil
+	})
 
 }
